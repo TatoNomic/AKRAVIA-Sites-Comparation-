@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UK NHS Sites 25-Mile Population Catchment Map</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <style>
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+        .leaflet-popup-content-wrapper {
+            background-color: #0f172a;
+            color: #f8fafc;
+            border: 1px solid #334155;
+            border-radius: 0.75rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+            padding: 4px;
+        }
+        .leaflet-popup-tip {
+            background-color: #0f172a;
+            border: 1px solid #334155;
+        }
+        @keyframes pulse-gap {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.15); opacity: 0.4; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+        .gap-pulse {
+            animation: pulse-gap 2.5s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans h-screen flex flex-col overflow-hidden">
+
+    <!-- Top Header Navigation -->
+    <header class="bg-slate-900 border-b border-slate-800 px-5 py-3 shrink-0 flex flex-wrap items-center justify-between gap-4 z-30">
+        <div class="flex items-center gap-3">
+            <div class="bg-blue-600/20 text-blue-400 p-2.5 rounded-xl border border-blue-500/30">
+                <i class="fa-solid fa-hospital-user text-xl"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg text-white leading-tight flex items-center gap-2">
+                    UK NHS Sites Population Map
+                    <span class="text-xs bg-blue-500/10 text-blue-400 px-2.5 py-0.5 rounded-full border border-blue-500/20 font-semibold">25-Mile Radius</span>
+                </h1>
+                <p class="text-xs text-slate-400">Catchment Population Ranking, Geographic Buffers & Coverage Gap Analysis</p>
+            </div>
+        </div>
+
+        <!-- Quick Summary Metrics -->
+        <div class="hidden lg:flex items-center gap-6 text-xs bg-slate-950/60 px-4 py-1.5 rounded-xl border border-slate-800">
+            <div>
+                <span class="text-slate-400 block text-[10px] uppercase font-semibold">Visible Hubs / Sites</span>
+                <span id="metric-total-sites" class="font-bold text-slate-200 text-sm">27</span>
+            </div>
+            <div class="h-6 w-px bg-slate-800"></div>
+            <div>
+                <span class="text-slate-400 block text-[10px] uppercase font-semibold">Total Visible Catchment Pop</span>
+                <span id="metric-total-pop" class="font-bold text-emerald-400 text-sm">0</span>
+            </div>
+            <div class="h-6 w-px bg-slate-800"></div>
+            <div>
+                <span class="text-slate-400 block text-[10px] uppercase font-semibold">Largest Uncovered Gap</span>
+                <span id="metric-top-gap" class="font-bold text-rose-400 text-sm">West Yorks (~2.45M)</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- View Toggle Bar -->
+    <div class="bg-slate-900/90 border-b border-slate-800 px-5 py-2.5 shrink-0 flex flex-wrap items-center justify-between gap-3 z-20 backdrop-blur-md">
+        <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">View Mode:</span>
+            <div class="inline-flex rounded-lg bg-slate-950 p-1 border border-slate-800 shadow-inner">
+                <button id="view-mode-gm" onclick="switchViewMode('gm')" class="px-3 py-1.5 rounded-md text-xs font-medium bg-blue-600 text-white transition flex items-center gap-1.5 shadow">
+                    <i class="fa-solid fa-hospital text-[11px]"></i> GM Sites Only (15)
+                </button>
+                <button id="view-mode-mhm-mhg" onclick="switchViewMode('mhm-mhg')" class="px-3 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-filter text-[11px] text-emerald-400"></i> MHM & MHG Sites Only (11)
+                </button>
+                <button id="view-mode-gaps" onclick="switchViewMode('gaps')" class="px-3 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-triangle-exclamation text-[11px] text-rose-400"></i> MHM/MHG + Uncovered Gaps (10)
+                </button>
+                <button id="view-mode-all" onclick="switchViewMode('all')" class="px-3 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-globe text-[11px]"></i> All 27 Sites
+                </button>
+            </div>
+        </div>
+        <div id="view-mode-banner" class="flex items-center gap-2 text-xs text-blue-400 bg-blue-500/10 px-3.5 py-1 rounded-full border border-blue-500/20 font-medium">
+            <i class="fa-solid fa-hospital"></i> Showing GM Sites Only (15) — MHM/MHG Sites Hidden
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+        
+        <!-- Left Sidebar: Controls & Ranked List -->
+        <aside class="w-full md:w-96 bg-slate-900/80 border-r border-slate-800 flex flex-col shrink-0 h-1/2 md:h-full z-10">
+            
+            <!-- Filter Controls Panel -->
+            <div class="p-4 border-b border-slate-800 space-y-3.5 bg-slate-900">
+                
+                <!-- Search Box -->
+                <div class="relative">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                    <input type="text" id="search-input" oninput="handleSearch(this.value)" placeholder="Search site, city, or gap region..." 
+                        class="w-full bg-slate-950 border border-slate-800 text-slate-100 text-xs rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:border-blue-500 transition placeholder:text-slate-500">
+                </div>
+
+                <!-- Catchment Buffer Slider -->
+                <div>
+                    <div class="flex justify-between items-center text-xs mb-1">
+                        <label for="radius-range" class="font-medium text-slate-300">Catchment Radius Buffer:</label>
+                        <span id="radius-val" class="font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 text-[11px]">25 Miles</span>
+                    </div>
+                    <input type="range" id="radius-range" min="5" max="50" step="5" value="25" oninput="updateRadius(this.value)" 
+                        class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                </div>
+
+                <!-- Filter Pill Buttons -->
+                <div class="flex flex-wrap gap-1.5 text-[11px]">
+                    <button onclick="setFilter('all')" id="btn-filter-all" class="px-2.5 py-1 rounded-md bg-slate-800 text-white font-medium border border-slate-700 transition">All Visible</button>
+                    <button onclick="setFilter('overlap')" id="btn-filter-overlap" class="px-2.5 py-1 rounded-md bg-slate-950 text-slate-400 hover:text-white border border-slate-800 transition flex items-center gap-1">
+                        <i class="fa-solid fa-circle text-[8px] text-amber-400"></i> Overlap
+                    </button>
+                    <button onclick="setFilter('gap')" id="btn-filter-gap" class="px-2.5 py-1 rounded-md bg-slate-950 text-slate-400 hover:text-white border border-slate-800 transition flex items-center gap-1">
+                        <i class="fa-solid fa-circle text-[8px] text-rose-400"></i> Population Gaps
+                    </button>
+                    <button onclick="setFilter('mhm')" id="btn-filter-mhm" class="px-2.5 py-1 rounded-md bg-slate-950 text-slate-400 hover:text-white border border-slate-800 transition">MHM</button>
+                    <button onclick="setFilter('mhg')" id="btn-filter-mhg" class="px-2.5 py-1 rounded-md bg-slate-950 text-slate-400 hover:text-white border border-slate-800 transition">MHG</button>
+                </div>
+            </div>
+
+            <!-- Site List Header -->
+            <div class="px-4 py-2 bg-slate-950 border-b border-slate-800/80 flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                <span id="list-header-title">Ranked Site Catchments</span>
+                <span id="site-count-badge" class="bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-mono">15 Sites</span>
+            </div>
+
+            <!-- Scrollable Ranked List -->
+            <div id="site-list" class="flex-1 overflow-y-auto p-3 space-y-2.5">
+                <!-- JS Populated Site Cards -->
+            </div>
+        </aside>
+
+        <!-- Right Area: Map Display -->
+        <main class="flex-1 h-1/2 md:h-full relative bg-slate-950">
+            <div id="map" class="w-full h-full z-0"></div>
+
+            <!-- Floating Map Legend -->
+            <div class="absolute bottom-5 right-5 z-[400] bg-slate-900/90 backdrop-blur-md border border-slate-800 p-3.5 rounded-xl shadow-2xl text-xs space-y-2 max-w-xs">
+                <div class="font-bold text-slate-200 border-b border-slate-800 pb-1 flex items-center gap-1.5">
+                    <i class="fa-solid fa-layer-group text-blue-400"></i> Map Legend
+                </div>
+                <div class="flex items-center gap-2 text-slate-300">
+                    <span class="w-3.5 h-3.5 rounded-full bg-emerald-500 border border-white/20 inline-block"></span>
+                    <span>MHM / MHG Active Hub</span>
+                </div>
+                <div class="flex items-center gap-2 text-slate-300">
+                    <span class="w-3.5 h-3.5 rounded-full bg-amber-400 border border-white/20 inline-block"></span>
+                    <span>Overlap Hub (MHM + GM)</span>
+                </div>
+                <div class="flex items-center gap-2 text-slate-300">
+                    <span class="w-3.5 h-3.5 rounded-full bg-blue-500 border border-white/20 inline-block"></span>
+                    <span>GM Site Only</span>
+                </div>
+                <div class="flex items-center gap-2 text-slate-300">
+                    <span class="w-3.5 h-3.5 rounded-full bg-rose-500 border border-white/20 inline-block"></span>
+                    <span>Uncovered Population Gap (>500k)</span>
+                </div>
+                <div class="text-[10px] text-slate-400 pt-1 border-t border-slate-800/80">
+                    Dashed red circles highlight major cities outside a <strong>25-mile radius</strong> of active MHM/MHG sites.
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Full Dataset: NHS Sites + Major Population Gap Regions
+        const siteData = [
+            // Standard Sites
+            { id: 1, name: "South West London and St George's NHS Foundation Trust", city: "London", lat: 51.428, lng: -0.174, gmSite: "Y", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 11250000, type: "site" },
+            { id: 2, name: "West London NHS Trust", city: "London", lat: 51.509, lng: -0.305, gmSite: "Y", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 11250000, type: "site" },
+            { id: 3, name: "East London NHS Foundation Trust", city: "London", lat: 51.528, lng: -0.053, gmSite: "Y", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 11250000, type: "site" },
+            { id: 4, name: "London Windsor Walk (South London)", city: "London", lat: 51.468, lng: -0.090, gmSite: "N", mhm: "N", tier: "", gladMhg: "Y", overlap: "NO", pop: 11250000, type: "site" },
+            { id: 5, name: "London (North London)", city: "London", lat: 51.550, lng: -0.120, gmSite: "N", mhm: "N", tier: "", gladMhg: "Y", overlap: "NO", pop: 11250000, type: "site" },
+            { id: 6, name: "MHG Manchester", city: "Manchester", lat: 53.480, lng: -2.242, gmSite: "N", mhm: "N", tier: "", gladMhg: "Y", overlap: "NO", pop: 3400000, type: "site" },
+            { id: 7, name: "Birmingham and Solihull Mental Health NHS Foundation Trust", city: "Birmingham", lat: 52.486, lng: -1.890, gmSite: "Y", mhm: "Y", tier: "T3", gladMhg: "N", overlap: "YES", pop: 3150000, type: "site" },
+            { id: 8, name: "Leeds and York Partnership NHS Foundation Trust", city: "Leeds", lat: 53.800, lng: -1.549, gmSite: "Y", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 2450000, type: "site" },
+            { id: 9, name: "Mersey Care NHS Foundation Trust", city: "Liverpool", lat: 53.408, lng: -2.991, gmSite: "N", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 2250000, type: "site" },
+            { id: 10, name: "MHG Liverpool", city: "Liverpool", lat: 53.400, lng: -2.980, gmSite: "N", mhm: "N", tier: "", gladMhg: "Y", overlap: "NO", pop: 2250000, type: "site" },
+            { id: 11, name: "Nottinghamshire Healthcare NHS Foundation Trust", city: "Nottingham", lat: 52.954, lng: -1.158, gmSite: "Y", mhm: "Y", tier: "T3", gladMhg: "N", overlap: "YES", pop: 1400000, type: "site" },
+            { id: 12, name: "Avon and Wiltshire Mental Health Partnership NHS Trust", city: "Bristol / Bath", lat: 51.454, lng: -2.587, gmSite: "Y", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 1300000, type: "site" },
+            { id: 13, name: "Cumbria, Northumberland, Tyne and Wear NHS Foundation Trust", city: "Newcastle upon Tyne", lat: 54.978, lng: -1.617, gmSite: "Y", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 1250000, type: "site" },
+            { id: 14, name: "Cardiff and Vale University Health Board", city: "Cardiff", lat: 51.481, lng: -3.179, gmSite: "Y", mhm: "Y", tier: "T3", gladMhg: "N", overlap: "YES", pop: 1100000, type: "site" },
+            { id: 15, name: "Hampshire and Isle of Wight Healthcare NHS Foundation Trust", city: "Southampton", lat: 50.909, lng: -1.404, gmSite: "Y", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 1050000, type: "site" },
+            { id: 16, name: "MHG Edinburgh", city: "Edinburgh", lat: 55.953, lng: -3.188, gmSite: "N", mhm: "N", tier: "", gladMhg: "Y", overlap: "NO", pop: 1000000, type: "site" },
+            { id: 17, name: "Sussex Partnership NHS Foundation Trust", city: "Worthing / Brighton", lat: 50.822, lng: -0.137, gmSite: "Y", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 980000, type: "site" },
+            { id: 18, name: "Kent and Medway NHS and Social Care Partnership Trust", city: "Maidstone", lat: 51.272, lng: 0.521, gmSite: "N", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 920000, type: "site" },
+            { id: 19, name: "MHG Belfast", city: "Belfast", lat: 54.597, lng: -5.930, gmSite: "N", mhm: "N", tier: "", gladMhg: "Y", overlap: "NO", pop: 850000, type: "site" },
+            { id: 20, name: "Rotherham, Doncaster and South Humber NHS Foundation Trust", city: "Doncaster", lat: 53.522, lng: -1.131, gmSite: "Y", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 810000, type: "site" },
+            { id: 21, name: "Tees, Esk and Wear Valleys NHS Foundation Trust", city: "Darlington", lat: 54.526, lng: -1.557, gmSite: "Y", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 760000, type: "site" },
+            { id: 22, name: "St Andrew's Healthcare", city: "Northampton", lat: 52.240, lng: -0.902, gmSite: "N", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 650000, type: "site" },
+            { id: 23, name: "Oxford Health NHS Foundation Trust", city: "Oxford", lat: 51.752, lng: -1.257, gmSite: "Y", mhm: "Y", tier: "T3 (Begin T2)", gladMhg: "N", overlap: "YES", pop: 540000, type: "site" },
+            { id: 24, name: "Herefordshire and Worcestershire Health and Care NHS Trust", city: "Worcester / Hereford", lat: 52.192, lng: -2.220, gmSite: "Y", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 480000, type: "site" },
+            { id: 25, name: "Cambridge", city: "Cambridge", lat: 52.205, lng: 0.121, gmSite: "N", mhm: "Y", tier: "T3", gladMhg: "N", overlap: "NO", pop: 470000, type: "site" },
+            { id: 26, name: "Devon Partnership NHS Trust", city: "Exeter", lat: 50.718, lng: -3.533, gmSite: "N", mhm: "Y", tier: "T1", gladMhg: "N", overlap: "NO", pop: 420000, type: "site" },
+            { id: 27, name: "Cornwall Partnership NHS Foundation Trust", city: "Bodmin / Truro", lat: 50.468, lng: -4.720, gmSite: "N", mhm: "N", tier: "", gladMhg: "N", overlap: "NO", pop: 310000, type: "site" },
+
+            // Uncovered Population Gap Overlay Areas
+            { id: 101, name: "West Yorkshire Conurbation (Leeds/Bradford)", city: "Leeds & Bradford", lat: 53.799, lng: -1.549, gmSite: "Y (Leeds FT)", mhm: "N", tier: "Uncovered Gap", gladMhg: "N", overlap: "NO", pop: 2450000, type: "gap", note: "Has active GM site (Leeds & York Partnership NHS FT)" },
+            { id: 102, name: "Glasgow & Clyde Valley Conurbation", city: "Glasgow", lat: 55.864, lng: -4.251, gmSite: "N", mhm: "N", tier: "Uncovered Gap", gladMhg: "N", overlap: "NO", pop: 1750000, type: "gap", note: "Zero local MHM/MHG or GM site presence (~42m to Edinburgh)" },
+            { id: 103, name: "North East England Conurbation (Newcastle/Teesside)", city: "Newcastle & Sunderland", lat: 54.978, lng: -1.617, gmSite: "Y (CNTW FT)", mhm: "N", tier: "Uncovered Gap", gladMhg: "N", overlap: "NO", pop: 1600000, type: "gap", note: "Has active GM site (CNTW NHS FT)" },
+            { id: 104, name: "South Yorkshire & Humber Conurbation", city: "Sheffield & Doncaster", lat: 53.381, lng: -1.470, gmSite: "Y (RDaSH FT)", mhm: "N", tier: "Uncovered Gap", gladMhg: "N", overlap: "NO", pop: 1350000, type: "gap", note: "Has active GM site (RDaSH NHS FT)" },
+            { id: 105, name: "West of England / Severnside", city: "Bristol & Bath", lat: 51.454, lng: -2.587, gmSite: "Y (Avon & Wilts)", mhm: "N", tier: "Uncovered Gap", gladMhg: "N", overlap: "NO", pop: 1300000, type: "gap", note: "Has active GM site (Avon & Wiltshire Partnership)" },
+            { id: 106, name: "Solent / South Coast Conurbation", city: "Southampton & Portsmouth", lat: 50.909, lng: -1.404, gmSite: "Y (Hampshire FT)", mhm: "N", tier: "Uncovered Gap", gladMhg: "N", overlap: "NO", pop: 1050000, type: "gap", note: "Has active GM site (Hampshire & Isle of Wight FT)" },
+            { id: 107, name: "Sussex Coast Urban Belt", city: "Brighton & Hove", lat: 50.822, lng: -0.137, gmSite: "Y (Sussex FT)", mhm: "N", tier: "Uncovered Gap", gladMhg: "N", overlap: "NO", pop: 980000, type: "gap", note: "Has active GM site (Sussex Partnership NHS FT)" },
+            { id: 108, name: "Kent & Medway Conurbation", city: "Medway & Maidstone", lat: 51.272, lng: 0.521, gmSite: "Y (Kent & Medway)", mhm: "N", tier: "Uncovered Gap", gladMhg: "N", overlap: "NO", pop: 920000, type: "gap", note: "Has active GM site (Kent & Medway NHS Trust)" },
+            { id: 109, name: "East Anglia (Norfolk & Suffolk)", city: "Norwich & Ipswich", lat: 52.630, lng: 1.297, gmSite: "N", mhm: "N", tier: "Uncovered Gap", gladMhg: "N", overlap: "NO", pop: 750000, type: "gap", note: "Isolated geographic gap (~60m to Cambridge)" },
+            { id: 110, name: "Far South West / Cornwall & West Devon", city: "Truro & Plymouth", lat: 50.263, lng: -5.051, gmSite: "N", mhm: "N", tier: "Uncovered Gap", gladMhg: "N", overlap: "NO", pop: 570000, type: "gap", note: "Geographic isolation (>60m west of Exeter hub)" }
+        ];
+
+        // Global State
+        let map;
+        let activeRadiusMiles = 25;
+        let activeFilter = 'all';
+        let activeViewMode = 'gm'; 
+        let searchQuery = '';
+        
+        let mapMarkers = [];
+        let mapCircles = [];
+
+        window.onload = function() {
+            initMap();
+            renderSidebarList();
+            setupEventListeners();
+        };
+
+        function initMap() {
+            map = L.map('map', { zoomControl: false }).setView([54.2, -2.8], 6);
+            L.control.zoom({ position: 'topright' }).addTo(map);
+
+            // Clean dark basemap without watermark or API key restrictions (Esri Dark Canvas)
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+                maxZoom: 16
+            }).addTo(map);
+
+            // Reference overlay for city names, boundaries, and coastlines
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '',
+                maxZoom: 16
+            }).addTo(map);
+
+            renderSiteLayers();
+        }
+
+        function switchViewMode(mode) {
+            activeViewMode = mode;
+            
+            const btnGm = document.getElementById('view-mode-gm');
+            const btnMhmMhg = document.getElementById('view-mode-mhm-mhg');
+            const btnGaps = document.getElementById('view-mode-gaps');
+            const btnAll = document.getElementById('view-mode-all');
+            const banner = document.getElementById('view-mode-banner');
+
+            const activeClass = 'px-3 py-1.5 rounded-md text-xs font-medium bg-blue-600 text-white transition flex items-center gap-1.5 shadow';
+            const activeMhmClass = 'px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white transition flex items-center gap-1.5 shadow';
+            const activeGapClass = 'px-3 py-1.5 rounded-md text-xs font-medium bg-rose-600 text-white transition flex items-center gap-1.5 shadow';
+            const inactiveClass = 'px-3 py-1.5 rounded-md text-xs font-medium text-slate-300 hover:text-white transition flex items-center gap-1.5';
+
+            btnGm.className = mode === 'gm' ? activeClass : inactiveClass;
+            btnMhmMhg.className = mode === 'mhm-mhg' ? activeMhmClass : inactiveClass;
+            btnGaps.className = mode === 'gaps' ? activeGapClass : inactiveClass;
+            btnAll.className = mode === 'all' ? activeClass : inactiveClass;
+
+            if (mode === 'mhm-mhg') {
+                banner.className = 'flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 px-3.5 py-1 rounded-full border border-emerald-500/20 font-medium';
+                banner.innerHTML = '<i class="fa-solid fa-circle-check"></i> Showing Active MHM & MHG Hubs Only (11) — Coverage Gaps Hidden';
+            } else if (mode === 'gaps') {
+                banner.className = 'flex items-center gap-2 text-xs text-rose-400 bg-rose-500/10 px-3.5 py-1 rounded-full border border-rose-500/20 font-medium';
+                banner.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Visualizing MHM/MHG Hubs + Top 10 Uncovered Urban Population Gaps (>500k)';
+            } else if (mode === 'gm') {
+                banner.className = 'flex items-center gap-2 text-xs text-blue-400 bg-blue-500/10 px-3.5 py-1 rounded-full border border-blue-500/20 font-medium';
+                banner.innerHTML = '<i class="fa-solid fa-hospital"></i> Showing GM Sites Only (15)';
+            } else {
+                banner.className = 'flex items-center gap-2 text-xs text-slate-300 bg-slate-800 px-3.5 py-1 rounded-full border border-slate-700 font-medium';
+                banner.innerHTML = '<i class="fa-solid fa-globe"></i> Displaying All 27 NHS / Research Sites';
+            }
+
+            renderSiteLayers();
+            renderSidebarList();
+        }
+
+        function isSiteVisible(site) {
+            // View Mode Level Filter
+            if (activeViewMode === 'gm') {
+                if (site.type === 'gap') return false;
+                if (site.gmSite !== 'Y') return false;
+            } else if (activeViewMode === 'mhm-mhg') {
+                if (site.type === 'gap') return false;
+                if (site.mhm !== 'Y' && site.gladMhg !== 'Y') return false;
+            } else if (activeViewMode === 'gaps') {
+                // Show MHM/MHG sites AND Gap regions
+                if (site.type === 'gap') return true;
+                if (site.mhm !== 'Y' && site.gladMhg !== 'Y') return false;
+            }
+
+            // Search Filter
+            const matchesSearch = site.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                                  site.city.toLowerCase().includes(searchQuery.toLowerCase());
+            if (!matchesSearch) return false;
+
+            // Pill Filters
+            if (activeFilter === 'overlap') return site.overlap === 'YES';
+            if (activeFilter === 'gap') return site.type === 'gap';
+            if (activeFilter === 'mhm') return site.mhm === 'Y';
+            if (activeFilter === 'mhg') return site.gladMhg === 'Y';
+
+            return true;
+        }
+
+        function renderSiteLayers() {
+            mapMarkers.forEach(m => map.removeLayer(m));
+            mapCircles.forEach(c => map.removeLayer(c));
+            mapMarkers = [];
+            mapCircles = [];
+
+            const metersPerMile = 1609.34;
+            const radiusMeters = activeRadiusMiles * metersPerMile;
+
+            const visibleSites = siteData.filter(isSiteVisible);
+            
+            visibleSites.forEach((site) => {
+                const isGap = site.type === 'gap';
+                const isOverlap = site.overlap === 'YES';
+                const isMhmMhg = site.mhm === 'Y' || site.gladMhg === 'Y';
+
+                let colorHex = '#3b82f6';
+                let fillColorHex = '#3b82f6';
+                
+                if (isGap) {
+                    colorHex = '#f43f5e'; // Rose red for gaps
+                    fillColorHex = '#f43f5e';
+                } else if (isOverlap) {
+                    colorHex = '#f59e0b'; // Amber
+                    fillColorHex = '#f59e0b';
+                } else if (isMhmMhg) {
+                    colorHex = '#10b981'; // Emerald Green
+                    fillColorHex = '#10b981';
+                }
+
+                // Catchment Circle
+                const circle = L.circle([site.lat, site.lng], {
+                    radius: radiusMeters,
+                    color: colorHex,
+                    fillColor: fillColorHex,
+                    fillOpacity: isGap ? 0.08 : 0.12,
+                    weight: isGap ? 2 : 1.5,
+                    dashArray: isGap ? '6, 6' : (isOverlap ? '4, 4' : null)
+                }).addTo(map);
+
+                // Center Pin
+                const marker = L.circleMarker([site.lat, site.lng], {
+                    radius: isGap ? 8 : 7,
+                    color: '#ffffff',
+                    weight: 2,
+                    fillColor: colorHex,
+                    fillOpacity: 1
+                }).addTo(map);
+
+                const popupContent = `
+                    <div class="p-2 space-y-2 max-w-xs">
+                        <div class="border-b border-slate-800 pb-1.5">
+                            <h3 class="font-bold text-sm text-white leading-snug">${site.name}</h3>
+                            <span class="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                                <i class="fa-solid fa-location-dot ${isGap ? 'text-rose-400' : 'text-blue-400'}"></i> ${site.city}
+                            </span>
+                        </div>
+                        <div class="bg-slate-950 p-2 rounded-lg border border-slate-800 flex justify-between items-center">
+                            <span class="text-[11px] text-slate-400 font-medium">${isGap ? 'Uncovered Population' : activeRadiusMiles + '-Mile Catchment'}:</span>
+                            <span class="font-bold ${isGap ? 'text-rose-400' : 'text-emerald-400'} text-xs">${site.pop.toLocaleString()}</span>
+                        </div>
+                        ${isGap ? `<p class="text-[11px] text-amber-300 bg-amber-500/10 p-1.5 rounded border border-amber-500/20"><i class="fa-solid fa-circle-info"></i> ${site.note}</p>` : ''}
+                        <div class="flex flex-wrap gap-1 text-[10px] pt-1">
+                            ${site.gmSite === 'Y' ? '<span class="bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded border border-blue-500/30 font-semibold">GM Site</span>' : ''}
+                            ${site.mhm === 'Y' ? `<span class="bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30 font-semibold">MHM</span>` : ''}
+                            ${site.gladMhg === 'Y' ? '<span class="bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded border border-teal-500/30 font-semibold">MHG</span>' : ''}
+                            ${isGap ? '<span class="bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded border border-rose-500/30 font-semibold">Uncovered Gap</span>' : ''}
+                        </div>
+                    </div>
+                `;
+
+                marker.bindPopup(popupContent);
+                circle.bindPopup(popupContent);
+
+                mapMarkers.push(marker);
+                mapCircles.push(circle);
+            });
+        }
+
+        function renderSidebarList() {
+            const listContainer = document.getElementById('site-list');
+            listContainer.innerHTML = '';
+
+            const visibleSites = siteData.filter(isSiteVisible);
+
+            document.getElementById('site-count-badge').innerText = `${visibleSites.length} Items`;
+            document.getElementById('metric-total-sites').innerText = visibleSites.length;
+
+            const totalPop = visibleSites.reduce((acc, curr) => acc + curr.pop, 0);
+            document.getElementById('metric-total-pop').innerText = (totalPop / 1000000).toFixed(1) + 'M Total';
+
+            if (visibleSites.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="text-center py-10 text-slate-500 space-y-2">
+                        <i class="fa-solid fa-hospital-line text-3xl"></i>
+                        <p class="text-xs">No sites or gap regions match criteria.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            visibleSites.forEach((site, index) => {
+                const rank = index + 1;
+                const isGap = site.type === 'gap';
+                const isOverlap = site.overlap === 'YES';
+                const isMhmMhg = site.mhm === 'Y' || site.gladMhg === 'Y';
+
+                let borderAccent = 'border-slate-800 hover:border-blue-500/50';
+                if (isGap) borderAccent = 'border-rose-500/30 hover:border-rose-400 bg-rose-500/5';
+                else if (isOverlap) borderAccent = 'border-amber-500/30 hover:border-amber-400 bg-amber-500/5';
+                else if (isMhmMhg) borderAccent = 'border-emerald-500/30 hover:border-emerald-400 bg-emerald-500/5';
+
+                const card = document.createElement('div');
+                card.className = `p-3 rounded-xl bg-slate-950 border ${borderAccent} cursor-pointer transition-all duration-200 hover:shadow-lg group`;
+                
+                card.onclick = () => focusSiteOnMap(site);
+
+                card.innerHTML = `
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="flex items-start gap-2.5">
+                            <span class="font-mono text-xs font-bold ${isGap ? 'text-rose-400 bg-rose-950/80 border-rose-800' : 'text-slate-400 bg-slate-900 border-slate-800'} px-2 py-0.5 rounded-md border shrink-0 mt-0.5">
+                                #${rank}
+                            </span>
+                            <div>
+                                <h4 class="font-semibold text-xs text-slate-200 leading-snug group-hover:text-blue-300 transition flex items-center gap-1.5">
+                                    ${site.name}
+                                    ${isGap ? '<i class="fa-solid fa-triangle-exclamation text-rose-400 text-[10px]"></i>' : ''}
+                                </h4>
+                                <span class="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
+                                    <i class="fa-solid fa-location-dot ${isGap ? 'text-rose-400' : 'text-slate-500'} text-[10px]"></i> ${site.city}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="text-right shrink-0">
+                            <span class="block text-xs font-bold ${isGap ? 'text-rose-400' : 'text-emerald-400'} font-mono">
+                                ${site.pop.toLocaleString()}
+                            </span>
+                            <span class="text-[10px] text-slate-500">${isGap ? 'Uncovered' : '25m Pop'}</span>
+                        </div>
+                    </div>
+
+                    ${isGap ? `<p class="text-[10px] text-slate-400 mt-2 bg-slate-900/80 p-1.5 rounded border border-slate-800/80"><strong class="text-rose-300">Gap Note:</strong> ${site.note}</p>` : ''}
+
+                    <div class="flex flex-wrap items-center gap-1 mt-2.5 pt-2 border-t border-slate-900">
+                        ${site.gmSite === 'Y' ? '<span class="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded font-medium">GM</span>' : ''}
+                        ${site.mhm === 'Y' ? `<span class="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-medium">MHM</span>` : ''}
+                        ${site.gladMhg === 'Y' ? '<span class="text-[10px] bg-teal-500/10 text-teal-400 border border-teal-500/20 px-2 py-0.5 rounded font-medium">MHG</span>' : ''}
+                        ${isGap ? '<span class="text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded font-semibold ml-auto">UNCOVERED GAP</span>' : ''}
+                        ${site.overlap === 'YES' ? '<span class="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-semibold ml-auto">OVERLAP</span>' : ''}
+                    </div>
+                `;
+
+                listContainer.appendChild(card);
+            });
+        }
+
+        function focusSiteOnMap(site) {
+            map.flyTo([site.lat, site.lng], 9, { duration: 1.2 });
+            mapMarkers.forEach(marker => {
+                const latLng = marker.getLatLng();
+                if (Math.abs(latLng.lat - site.lat) < 0.001 && Math.abs(latLng.lng - site.lng) < 0.001) {
+                    marker.openPopup();
+                }
+            });
+        }
+
+        function setupEventListeners() {
+            window.updateRadius = function(val) {
+                activeRadiusMiles = parseInt(val);
+                document.getElementById('radius-val').innerText = `${activeRadiusMiles} Miles`;
+                renderSiteLayers();
+            };
+
+            window.handleSearch = function(val) {
+                searchQuery = val;
+                renderSiteLayers();
+                renderSidebarList();
+            };
+
+            window.setFilter = function(filter) {
+                activeFilter = filter;
+                renderSiteLayers();
+                renderSidebarList();
+            };
+        }
+    </script>
+</body>
+</html>
